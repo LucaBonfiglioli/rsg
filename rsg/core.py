@@ -5,7 +5,7 @@ import inspect
 import string
 from abc import ABCMeta
 from random import choice, choices, randint, random
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from rsg.utils.helpers import make_attrs
 
@@ -13,6 +13,8 @@ _gen_meth_t = Callable[[], Any]
 
 
 class _GeneratorFn:
+    CHILDREN_ARG = "children"
+
     def __init__(
         self,
         name: str,
@@ -35,9 +37,13 @@ class _GeneratorFn:
     def chance_kw(self) -> str:
         return f"{self.name}_chance"
 
-    def __call__(self, caller: Any) -> Any:
+    def __call__(self, caller: Rsg) -> Any:
         args = [getattr(caller, x) for x in self._argnames]
         kwargs = {k: getattr(caller, k, v) for k, v in self._kwargnames.items()}
+
+        if not self.is_leaf:
+            kwargs[self.CHILDREN_ARG] = caller._generate_children()
+
         return self._method(caller, *args, **kwargs)
 
     def __repr__(self) -> str:
@@ -63,14 +69,17 @@ class _GeneratorFnFactory:
         return args, kwargs
 
     @classmethod
-    def create(cls, name: str, is_leaf: bool, fn: Callable) -> _GeneratorFn:
+    def create(cls, name: str, fn: Callable) -> _GeneratorFn:
         args, kwargs = cls._inspect_signature(fn)
+        is_leaf = _GeneratorFn.CHILDREN_ARG not in args
+        if not is_leaf:
+            args.remove(_GeneratorFn.CHILDREN_ARG)
         return _GeneratorFn(name, is_leaf, fn, args, kwargs)
 
 
-def generator(name: str, is_leaf: bool = False) -> Callable[[Callable], _GeneratorFn]:
+def generator(name: str) -> Callable[[Callable], _GeneratorFn]:
     def _wrapped(fn: Callable) -> _GeneratorFn:
-        return _GeneratorFnFactory.create(name, is_leaf, fn)
+        return _GeneratorFnFactory.create(name, fn)
 
     return _wrapped
 
@@ -101,7 +110,7 @@ class Rsg(metaclass=RsgMeta):
         self._child = None
 
         if len(self._generators) == 0:
-            gen = _GeneratorFnFactory.create("default", True, (lambda self: None))
+            gen = _GeneratorFnFactory.create("default", (lambda self: None))
             self._generators_map[gen.name] = gen
 
         leaf_gen = {x for x in self._generators if x.is_leaf}
@@ -129,7 +138,7 @@ class Rsg(metaclass=RsgMeta):
     def _generate_child(self) -> Any:
         return next(self.child)
 
-    def _generate_children(self) -> list[Any]:
+    def _generate_children(self) -> Iterable[Any]:
         n = randint(self.min_breadth, self.max_breadth)
         n = n if self.max_depth > 0 else 0
         res = [self._generate_child() for _ in range(n)]
@@ -145,7 +154,7 @@ class Rsg(metaclass=RsgMeta):
 
 
 class RsgStr(Rsg):
-    @generator("str", is_leaf=True)
+    @generator("str")
     def _generate_str(self, min_str_len: int = 4, max_str_len: int = 10) -> str:
         n = randint(min_str_len, max_str_len)
         charset = string.ascii_letters + string.digits + string.punctuation
@@ -153,38 +162,40 @@ class RsgStr(Rsg):
 
 
 class RsgFloat(Rsg):
-    @generator("float", is_leaf=True)
+    @generator("float")
     def _generate_float(self, max_float_val: float = 1000.0) -> float:
         return random() * max_float_val
 
 
 class RsgInt(Rsg):
-    @generator("int", is_leaf=True)
+    @generator("int")
     def _generate_int(self, max_int_val: int = 1000) -> int:
         return randint(0, max_int_val)
 
 
 class RsgDict(Rsg):
     @generator("dict")
-    def _generate_dict(self, min_key_len: int = 4, max_key_len: int = 10) -> dict:
+    def _generate_dict(
+        self, children: Iterable[Any], min_key_len: int = 4, max_key_len: int = 10
+    ) -> dict:
         def _generate_key() -> str:
             n = randint(min_key_len, max_key_len)
             charset = string.ascii_letters + string.digits + "_"
             return choice(string.ascii_letters) + "".join(choices(charset, k=n - 1))
 
-        return {_generate_key(): x for x in self._generate_children()}
+        return {_generate_key(): x for x in children}
 
 
 class RsgList(Rsg):
     @generator("list")
-    def _generate_list(self) -> list:
-        return self._generate_children()
+    def _generate_list(self, children: Iterable[Any]) -> list:
+        return children
 
 
 class RsgTuple(Rsg):
     @generator("tuple")
-    def _generate_tuple(self) -> tuple:
-        return tuple(self._generate_children())
+    def _generate_tuple(self, children: Iterable[Any]) -> tuple:
+        return tuple(children)
 
 
 class RsgBase(RsgInt, RsgFloat, RsgStr, RsgDict, RsgList, RsgTuple):
