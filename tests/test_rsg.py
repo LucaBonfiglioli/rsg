@@ -1,14 +1,15 @@
-from rsg import generator, ObjectGenerator
+import rich
+from rsg.core import RsgBase, generator
 
 
-class MyExtendedGenerator(ObjectGenerator):
+class RsgSasso(RsgBase):
     @generator("sasso", is_leaf=True)
     def _generate_sasso(self) -> str:
         return f"SASSO"
 
 
 def test_rsg():
-    generator = MyExtendedGenerator(
+    generator = RsgSasso(
         min_depth=4,
         max_depth=4,
         list_chance=1.0,
@@ -19,4 +20,4 @@ def test_rsg():
         max_float_val=0.1,
     )
     for _ in range(100):
-        generator.generate()
+        rich.print(next(generator))

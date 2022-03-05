@@ -75,14 +75,14 @@ def generator(name: str, is_leaf: bool = False) -> Callable[[Callable], _Generat
     return _wrapped
 
 
-class GeneratorMeta(ABCMeta):
+class RsgMeta(ABCMeta):
     def __init__(self, name, bases, namespace) -> None:
         super().__init__(name, bases, namespace)
         gen = inspect.getmembers(self, predicate=lambda x: isinstance(x, _GeneratorFn))
         self._generators_map: dict[str, _GeneratorFn] = {v.name: v for _, v in gen}
 
 
-class ObjectGenerator(metaclass=GeneratorMeta):
+class Rsg(metaclass=RsgMeta):
     @classmethod
     @property
     def _generators(cls) -> set[_GeneratorFn]:
@@ -90,7 +90,7 @@ class ObjectGenerator(metaclass=GeneratorMeta):
 
     def __init__(
         self,
-        min_depth: int = 2,
+        min_depth: int = 0,
         max_depth: int = 4,
         min_breadth: int = 2,
         max_breadth: int = 4,
@@ -98,31 +98,73 @@ class ObjectGenerator(metaclass=GeneratorMeta):
     ) -> None:
         make_attrs(self, locals())
         self._kwargs = kwargs
-        self._gen_chances = {x: kwargs.get(x.chance_kw, 1.0) for x in self._generators}
         self._child = None
 
+        if len(self._generators) == 0:
+            gen = _GeneratorFnFactory.create("default", True, (lambda self: None))
+            self._generators_map[gen.name] = gen
+
+        leaf_gen = {x for x in self._generators if x.is_leaf}
+        non_leaf_gen = {x for x in self._generators if not x.is_leaf}
+
+        available_gen = set()
+        if self.min_depth == 0:
+            available_gen.update(leaf_gen)
+        if self.max_depth > 0:
+            available_gen.update(non_leaf_gen)
+
+        if len(available_gen) == 0:
+            available_gen = self._generators
+
+        self._gen_chances = {x: kwargs.get(x.chance_kw, 1.0) for x in available_gen}
+
     @property
-    def child(self) -> ObjectGenerator:
+    def child(self) -> Rsg:
         if self._child is None:
             self._child = copy.copy(self)
             self._child.min_depth = max(0, self.min_depth - 1)
             self._child.max_depth = max(0, self.max_depth - 1)
         return self._child
 
+    def _generate_child(self) -> Any:
+        return next(self.child)
+
+    def _generate_children(self) -> list[Any]:
+        n = randint(self.min_breadth, self.max_breadth)
+        n = n if self.max_depth > 0 else 0
+        res = [self._generate_child() for _ in range(n)]
+        return res
+
+    def generate(self) -> Any:
+        fns, probs = list(zip(*[(k, v) for k, v in self._gen_chances.items()]))
+        fn = choices(fns, probs)[0]
+        return fn(self)
+
+    def __next__(self) -> Any:
+        return self.generate()
+
+
+class RsgStr(Rsg):
     @generator("str", is_leaf=True)
     def _generate_str(self, min_str_len: int = 4, max_str_len: int = 10) -> str:
         n = randint(min_str_len, max_str_len)
         charset = string.ascii_letters + string.digits + string.punctuation
         return "".join(choices(charset, k=n))
 
+
+class RsgFloat(Rsg):
     @generator("float", is_leaf=True)
     def _generate_float(self, max_float_val: float = 1000.0) -> float:
         return random() * max_float_val
 
+
+class RsgInt(Rsg):
     @generator("int", is_leaf=True)
     def _generate_int(self, max_int_val: int = 1000) -> int:
         return randint(0, max_int_val)
 
+
+class RsgDict(Rsg):
     @generator("dict")
     def _generate_dict(self, min_key_len: int = 4, max_key_len: int = 10) -> dict:
         def _generate_key() -> str:
@@ -132,32 +174,18 @@ class ObjectGenerator(metaclass=GeneratorMeta):
 
         return {_generate_key(): x for x in self._generate_children()}
 
+
+class RsgList(Rsg):
     @generator("list")
     def _generate_list(self) -> list:
         return self._generate_children()
 
+
+class RsgTuple(Rsg):
     @generator("tuple")
     def _generate_tuple(self) -> tuple:
         return tuple(self._generate_children())
 
-    def _gen_chances_by_leaf(self, is_leaf: bool) -> dict[_GeneratorFn, float]:
-        return {k: v for k, v in self._gen_chances.items() if k.is_leaf == is_leaf}
 
-    def _generate_child(self) -> Any:
-        return self.child.generate()
-
-    def _generate_children(self) -> list[Any]:
-        n = randint(self.min_breadth, self.max_breadth)
-        res = [self._generate_child() for _ in range(n)]
-        return res
-
-    def generate(self) -> Any:
-        generators = {}
-        if self.min_depth == 0:
-            generators.update(self._gen_chances_by_leaf(True))
-        if self.max_depth > 0:
-            generators.update(self._gen_chances_by_leaf(False))
-
-        fns, probs = list(zip(*[(k, v) for k, v in generators.items()]))
-        fn = choices(fns, probs)[0]
-        return fn(self)
+class RsgBase(RsgInt, RsgFloat, RsgStr, RsgDict, RsgList, RsgTuple):
+    pass
