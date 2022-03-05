@@ -17,7 +17,7 @@ setup(
     description="Random Structure Generator",
     long_description=readme,
     license="GNU General Public License v3.0",
-    version="0.0.0",
+    version="0.0.1",
     keywords="choixe",
     url="https://github.com/lucabonfiglioli/rsg",
     # Requirements
