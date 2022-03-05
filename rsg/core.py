@@ -13,6 +13,11 @@ _gen_meth_t = Callable[[], Any]
 
 
 class _GeneratorFn:
+    """Private class used to decorate a generator method, can be invoked without
+    arguments, the argument required by the original method are automatically filled
+    with the proper values.
+    """
+
     CHILDREN_ARG = "children"
 
     def __init__(
@@ -22,20 +27,41 @@ class _GeneratorFn:
         method: _gen_meth_t,
         argnames: list[str],
         kwargnames: dict[str, Any],
+        default_chance: float,
     ) -> None:
+        """Constructor for `_GeneratorFN`.
+
+        Args:
+            name (str): Name of the generator method, this name is used to dynamically
+            add arguments to the Rsg constructor.
+            is_leaf (bool): True if the outputs of this method are leaf.
+            method (_gen_meth_t): The method to wrap.
+            argnames (list[str]): The names of all positional arguments.
+            kwargnames (dict[str, Any]): The names and default value of all keyword
+            arguments.
+        """
         make_attrs(self, locals(), private=True)
 
     @property
     def name(self) -> str:
+        """The name of this method."""
         return self._name
 
     @property
     def is_leaf(self) -> bool:
+        """Leaf/Non-Leaf boolean value."""
         return self._is_leaf
 
     @property
     def chance_kw(self) -> str:
+        """The name of the keyword argument that controls the chance of this generator
+        method."""
         return f"{self.name}_chance"
+
+    @property
+    def default_chance(self) -> float:
+        """The default chance associated to this method"""
+        return self._default_chance
 
     def __call__(self, caller: Rsg) -> Any:
         args = [getattr(caller, x) for x in self._argnames]
@@ -54,8 +80,19 @@ class _GeneratorFn:
 
 
 class _GeneratorFnFactory:
+    """Factory for `_GeneratorFn`."""
+
     @classmethod
     def _inspect_signature(cls, fn: Callable) -> tuple[list[str], dict[str, Any]]:
+        """Inspects the signature of a function, finding all args and kwargs using
+        the `inspect` module.
+
+        Args:
+            fn (Callable): The function to inspect.
+
+        Returns:
+            tuple[list[str], dict[str, Any]]: (list of args, dictionary of kwargs).
+        """
         params = inspect.signature(fn).parameters
         args = []
         kwargs = {}
@@ -69,22 +106,55 @@ class _GeneratorFnFactory:
         return args, kwargs
 
     @classmethod
-    def create(cls, name: str, fn: Callable) -> _GeneratorFn:
+    def create(
+        cls, name: str, fn: Callable, default_chance: float = 1.0
+    ) -> _GeneratorFn:
+        """Creates a `_GeneratorFn` from a name and a callable method.
+
+        Args:
+            name (str): Custom name of the method.
+            fn (Callable): Method to decorate.
+            default_chance (float, optional): Default chance for this generator,
+            defaults to 1.0
+
+        Returns:
+            _GeneratorFn: The decorated method as a `_GeneratorFn` instance.
+        """
         args, kwargs = cls._inspect_signature(fn)
         is_leaf = _GeneratorFn.CHILDREN_ARG not in args
         if not is_leaf:
             args.remove(_GeneratorFn.CHILDREN_ARG)
-        return _GeneratorFn(name, is_leaf, fn, args, kwargs)
+        return _GeneratorFn(name, is_leaf, fn, args, kwargs, default_chance)
 
 
-def generator(name: str) -> Callable[[Callable], _GeneratorFn]:
+def generator(
+    name: str, default_chance: float = 1.0
+) -> Callable[[Callable], _GeneratorFn]:
+    """Decorator for generator methods. Any method decorated with this function is
+    added to a pool of generators and automatically invoked with the right arguments.
+
+    See `Rsg` documentation for more info.
+
+    Args:
+        name (str): The custom name of the method
+        default_chance (float, optional): Default chance for this generator, defaults to
+        1.0
+
+    Returns:
+        Callable[[Callable], _GeneratorFn]: Decorator function.
+    """
+
     def _wrapped(fn: Callable) -> _GeneratorFn:
-        return _GeneratorFnFactory.create(name, fn)
+        return _GeneratorFnFactory.create(name, fn, default_chance=default_chance)
 
     return _wrapped
 
 
 class RsgMeta(ABCMeta):
+    """Metaclass that inspects members to find all `_GeneratorFn` instances and adds
+    them to a class attribute.
+    """
+
     def __init__(self, name, bases, namespace) -> None:
         super().__init__(name, bases, namespace)
         gen = inspect.getmembers(self, predicate=lambda x: isinstance(x, _GeneratorFn))
@@ -92,6 +162,81 @@ class RsgMeta(ABCMeta):
 
 
 class Rsg(metaclass=RsgMeta):
+    """Base class for all Generators. Provides functionalities to recursively generate
+    custom data structures with custom breadth, depth and fully customizable logic.
+
+    Example:
+        Let's make a random generator for powers of a number::
+
+            class RandomPower(Rsg):
+                @generator("power")
+                def random_powers(self, base: int, exp_max: int):
+                    exp = random.randint(0, exp_max)
+                    return base**exp
+
+        Here, the method `random_powers` takes two inputs: `base` and
+        `exp_max`. After decorating the method with `@generator("power")`, we can pass
+        these parameters directly in the class constructor::
+
+            gen = RandomPower(base=2, exp_max=10)
+            [next(gen) for _ in range(5)]
+
+            >>> [1, 512, 4, 64, 16]
+
+        Let's complicate things, by creating a generator of nested lists containing
+        random powers, starting from the previous example::
+
+            class NestedRandomPowers(RandomPower):
+                @generator("list")
+                def random_lists(self, children):
+                    return list(children)
+
+        Here, the method `random_lists` takes an argument named `children` which is
+        a reseved argument that contains an iterable of random children objects.
+        The function simply converts the iterator to a list and returns it.
+
+        The number of generated children and the structure depth can be customized with
+        `Rst` base class parameters which are inherited by all subclasses::
+
+            gen = NestedRandomPowers(
+                min_depth=2,
+                max_depth=3,
+                min_breadth=2,
+                max_breadth=5,
+                base=2,
+                exp_max=10,
+            )
+            next(gen)
+
+            >>> [[16, [64, 16, 1, 256]], [128, [64, 32]], [[256, 128, 8, 2], [1, 8]]]
+
+        When having more than one generator method you can set a custom random
+        probability for each of them, by setting the `<METHOD_NAME>_chance` keyword
+        argument to a custom float. All these probabilities are normalized internally
+        so you don't have to do it on your own::
+
+            gen = NestedRandomPowers(
+                base=2,
+                exp_max=10,
+                list_chance=0.75,
+                power_chance=0.25,
+            )
+
+        You can combine more Generators into one with multiple inheritance::
+
+            from rsg.core import RsgInt, RsgFloat, RsgStr
+
+            ValueGenerator(IntRsg, FloatRsg, StrRsg):
+                pass
+
+            gen = ValueGenerator(int_chance=1, float_chance=0.5, str_chance=0.2)
+            [next(gen) for _ in range(10)]
+
+            >>> [413, 'U(II9_|>@<', 0.05976, 483, 153, 'A36WAEKM', 209, 633, 444, 754]
+
+
+    """
+
     @classmethod
     @property
     def _generators(cls) -> set[_GeneratorFn]:
@@ -100,9 +245,9 @@ class Rsg(metaclass=RsgMeta):
     def __init__(
         self,
         min_depth: int = 0,
-        max_depth: int = 4,
-        min_breadth: int = 2,
-        max_breadth: int = 4,
+        max_depth: int = 1,
+        min_breadth: int = 0,
+        max_breadth: int = 1,
         **kwargs,
     ) -> None:
         make_attrs(self, locals())
@@ -130,9 +275,13 @@ class Rsg(metaclass=RsgMeta):
     @property
     def child(self) -> Rsg:
         if self._child is None:
-            self._child = copy.copy(self)
-            self._child.min_depth = max(0, self.min_depth - 1)
-            self._child.max_depth = max(0, self.max_depth - 1)
+            self._child = self.__class__(
+                min_depth=max(0, self.min_depth - 1),
+                max_depth=max(0, self.max_depth - 1),
+                min_breadth=self.min_breadth,
+                max_breadth=self.max_breadth,
+                **self._kwargs,
+            )
         return self._child
 
     def _generate_child(self) -> Any:

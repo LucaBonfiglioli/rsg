@@ -3,7 +3,7 @@ from rsg.core import RsgBase, generator
 
 
 class RsgSasso(RsgBase):
-    @generator("sasso", is_leaf=True)
+    @generator("sasso")
     def _generate_sasso(self) -> str:
         return f"SASSO"
 
