@@ -9,6 +9,19 @@ with open("requirements_dev.txt") as requirements_file:
 with open("README.md") as readme_file:
     readme = readme_file.read()
 
+keywords = [
+    "rng",
+    "random",
+    "structure",
+    "generator",
+    "rsg",
+    "deep",
+    "nested",
+    "composite",
+    "tree",
+    "recursive",
+]
+
 setup(
     # Info
     author="Luca Bonfiglioli",
@@ -16,9 +29,10 @@ setup(
     name="rsg",
     description="Random Structure Generator",
     long_description=readme,
+    long_description_content_type="text/markdown",
     license="GNU General Public License v3.0",
     version="0.0.1",
-    keywords="choixe",
+    keywords=keywords,
     url="https://github.com/lucabonfiglioli/rsg",
     # Requirements
     python_requires=">=3.9",
