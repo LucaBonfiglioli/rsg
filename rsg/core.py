@@ -196,7 +196,7 @@ class Rsg(metaclass=RsgMeta):
         The function simply converts the iterator to a list and returns it.
 
         The number of generated children and the structure depth can be customized with
-        `Rst` base class parameters which are inherited by all subclasses::
+        `Rsg` base class parameters which are inherited by all subclasses::
 
             gen = NestedRandomPowers(
                 min_depth=2,
@@ -250,6 +250,16 @@ class Rsg(metaclass=RsgMeta):
         max_breadth: int = 1,
         **kwargs,
     ) -> None:
+        """Constructor for `Rsg`
+
+        Args:
+            min_depth (int, optional): Minimum structure depth, ignored if no recursive
+            generator is available. Defaults to 0.
+            max_depth (int, optional): Maximum structure depth. Defaults to 1.
+            min_breadth (int, optional): Minimum number of children. Ignored if maximum
+            depth is 0. Defaults to 0.
+            max_breadth (int, optional): Maximum number of children. Defaults to 1.
+        """
         make_attrs(self, locals())
         self._kwargs = kwargs
         self._child = None
@@ -274,6 +284,11 @@ class Rsg(metaclass=RsgMeta):
 
     @property
     def child(self) -> Rsg:
+        """Returns a copy of this `Rsg` with min and max depth reduced by one.
+
+        Returns:
+            Rsg: The child `Rsg`
+        """
         if self._child is None:
             self._child = self.__class__(
                 min_depth=max(0, self.min_depth - 1),
@@ -284,25 +299,40 @@ class Rsg(metaclass=RsgMeta):
             )
         return self._child
 
-    def _generate_child(self) -> Any:
-        return next(self.child)
-
     def _generate_children(self) -> Iterable[Any]:
+        """Generate a random amount of children objects using the child rsg.
+
+        Returns:
+            Iterable[Any]: An iterable of children objects
+        """
         n = randint(self.min_breadth, self.max_breadth)
         n = n if self.max_depth > 0 else 0
-        res = [self._generate_child() for _ in range(n)]
+        res = [next(self.child) for _ in range(n)]
         return res
 
     def generate(self) -> Any:
+        """Generate a random object
+
+        Returns:
+            Any: The generated object
+        """
         fns, probs = list(zip(*[(k, v) for k, v in self._gen_chances.items()]))
         fn = choices(fns, probs)[0]
         return fn(self)
 
     def __next__(self) -> Any:
+        """Alias for `generate`"""
         return self.generate()
 
 
 class RsgStr(Rsg):
+    """Rsg for random strings of letters, digits and punctuations
+
+    Args:
+        min_str_len (int, optional): Minimum string length. Defaults to 4.
+        max_str_len (int, optional): Maximum string length. Defaults to 10.
+    """
+
     @generator("str")
     def _generate_str(self, min_str_len: int = 4, max_str_len: int = 10) -> str:
         n = randint(min_str_len, max_str_len)
@@ -311,18 +341,37 @@ class RsgStr(Rsg):
 
 
 class RsgFloat(Rsg):
+    """Rsg for random floats
+
+    Args:
+        max_float_val (float, optional): Maximum float value. Defaults to 1.0
+    """
+
     @generator("float")
-    def _generate_float(self, max_float_val: float = 1000.0) -> float:
+    def _generate_float(self, max_float_val: float = 1.0) -> float:
         return random() * max_float_val
 
 
 class RsgInt(Rsg):
+    """Rsg for random integers
+
+    Args:
+        max_int_val (int, optional): Maximum integer value. Defaults to 1000
+    """
+
     @generator("int")
     def _generate_int(self, max_int_val: int = 1000) -> int:
         return randint(0, max_int_val)
 
 
 class RsgDict(Rsg):
+    """Rsg for random dictionaries, keys are valid python identifiers.
+
+    Args:
+        min_key_len (int, optional): Minimum key length. Defaults to 4.
+        max_key_len (int, optional): Maximum key length. Defaults to 10.
+    """
+
     @generator("dict")
     def _generate_dict(
         self, children: Iterable[Any], min_key_len: int = 4, max_key_len: int = 10
@@ -336,16 +385,22 @@ class RsgDict(Rsg):
 
 
 class RsgList(Rsg):
+    """Rsg for random lists."""
+
     @generator("list")
     def _generate_list(self, children: Iterable[Any]) -> list:
-        return children
+        return list(children)
 
 
 class RsgTuple(Rsg):
+    """Rsg for random tuples."""
+
     @generator("tuple")
     def _generate_tuple(self, children: Iterable[Any]) -> tuple:
         return tuple(children)
 
 
 class RsgBase(RsgInt, RsgFloat, RsgStr, RsgDict, RsgList, RsgTuple):
+    """Rsg for random built-in objects."""
+
     pass
