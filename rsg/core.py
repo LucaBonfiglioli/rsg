@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import copy
 import inspect
 import string
 from abc import ABCMeta
 from random import choice, choices, randint, random
 from typing import Any, Callable, Iterable
 
-from rsg.utils.helpers import make_attrs
+from rsg.utils.helpers import inspect_signature, make_attrs
 
 _gen_meth_t = Callable[[], Any]
 
@@ -72,7 +71,7 @@ class _GeneratorFn:
 
         return self._method(caller, *args, **kwargs)
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> str:  # pragma: no cover
         return f"GeneratorFn({self.name}, {self._method.__name__})"
 
     def __hash__(self) -> int:
@@ -81,29 +80,6 @@ class _GeneratorFn:
 
 class _GeneratorFnFactory:
     """Factory for `_GeneratorFn`."""
-
-    @classmethod
-    def _inspect_signature(cls, fn: Callable) -> tuple[list[str], dict[str, Any]]:
-        """Inspects the signature of a function, finding all args and kwargs using
-        the `inspect` module.
-
-        Args:
-            fn (Callable): The function to inspect.
-
-        Returns:
-            tuple[list[str], dict[str, Any]]: (list of args, dictionary of kwargs).
-        """
-        params = inspect.signature(fn).parameters
-        args = []
-        kwargs = {}
-        for k, v in params.items():
-            if k == "self":
-                continue
-            if v.default == inspect._empty:
-                args.append(k)
-            else:
-                kwargs[k] = v.default
-        return args, kwargs
 
     @classmethod
     def create(
@@ -120,7 +96,8 @@ class _GeneratorFnFactory:
         Returns:
             _GeneratorFn: The decorated method as a `_GeneratorFn` instance.
         """
-        args, kwargs = cls._inspect_signature(fn)
+        args, kwargs = inspect_signature(fn)
+        args.pop(0)
         is_leaf = _GeneratorFn.CHILDREN_ARG not in args
         if not is_leaf:
             args.remove(_GeneratorFn.CHILDREN_ARG)
@@ -280,7 +257,9 @@ class Rsg(metaclass=RsgMeta):
         if len(available_gen) == 0:
             available_gen = self._generators
 
-        self._gen_chances = {x: kwargs.get(x.chance_kw, 1.0) for x in available_gen}
+        self._gen_chances = {
+            x: kwargs.get(x.chance_kw, x.default_chance) for x in available_gen
+        }
 
     @property
     def child(self) -> Rsg:
