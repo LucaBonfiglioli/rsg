@@ -31,7 +31,7 @@ setup(
     long_description=readme,
     long_description_content_type="text/markdown",
     license="GNU General Public License v3.0",
-    version="0.0.1",
+    version="0.1.0",
     keywords=keywords,
     url="https://github.com/lucabonfiglioli/rsg",
     # Requirements
